@@ -1,6 +1,7 @@
-import { isAuth } from './isAuthMiddleware';
-import { createAccessToken, createRefreshToken } from './helpers';
-import { User } from './entity/User';
+import { sendRefreshToken } from "./sendRefreshToken";
+import { isAuth } from "./isAuthMiddleware";
+import { createAccessToken, createRefreshToken } from "./helpers";
+import { User } from "./entity/User";
 import {
   Resolver,
   Query,
@@ -10,9 +11,11 @@ import {
   Field,
   Ctx,
   UseMiddleware,
-} from 'type-graphql';
-import { hash, compare } from 'bcryptjs';
-import { MyContext } from './contextType';
+  Int,
+} from "type-graphql";
+import { hash, compare } from "bcryptjs";
+import { MyContext } from "./contextType";
+import { getConnection } from "typeorm";
 
 @ObjectType()
 class LoginResponse {
@@ -35,21 +38,21 @@ export class UserResolver {
 
   @Mutation(() => LoginResponse)
   async login(
-    @Arg('email', () => String) email: string,
-    @Arg('password', () => String) password: string,
+    @Arg("email", () => String) email: string,
+    @Arg("password", () => String) password: string,
     @Ctx() { res }: MyContext
   ): Promise<LoginResponse> {
     const user = await User.findOne({ where: { email } });
     if (!user) {
-      throw new Error('Could not find user');
+      throw new Error("Could not find user");
     }
 
     const valid = await compare(password, user.password);
     if (!valid) {
-      throw new Error('Incorrect password');
+      throw new Error("Incorrect password");
     }
 
-    res.cookie('jid', createRefreshToken(user), { httpOnly: true });
+    sendRefreshToken(res, createRefreshToken(user));
 
     return {
       accessToken: createAccessToken(user),
@@ -58,8 +61,8 @@ export class UserResolver {
 
   @Mutation(() => Boolean)
   async register(
-    @Arg('email', () => String) email: string,
-    @Arg('password', () => String) password: string
+    @Arg("email", () => String) email: string,
+    @Arg("password", () => String) password: string
   ) {
     const hashedPassword = await hash(password, 12);
 
@@ -74,6 +77,15 @@ export class UserResolver {
       console.error(err);
       return false;
     }
+  }
+
+  @Mutation(() => Boolean)
+  async revokeRefreshTokensForUser(@Arg("userId", () => Int) userId: number) {
+    await getConnection()
+      .getRepository(User)
+      .increment({ id: userId }, "tokenVersion", 1);
+
+    return true;
   }
 }
 
